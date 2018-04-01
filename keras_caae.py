@@ -24,9 +24,9 @@ import numpy as np
 
 class CAAE:
     def __init__(self):
-        self.rows = 28
-        self.cols = 28
-        self.channel = 1
+        self.rows = 64
+        self.cols = 64
+        self.channel = 3
         self.img_shape = (self.rows, self.cols, self.channel)
         self.encoded_dim = 100
         self.num_classes = 10
@@ -102,25 +102,6 @@ class CAAE:
         return Model(img, encoded_repr)
 
     def build_decoder(self):
-        # Decoder
-        # decoder = Sequential()
-        #
-        # decoder.add(Dense(512, input_dim=self.encoded_dim))
-        # decoder.add(LeakyReLU(alpha=0.2))
-        # decoder.add(BatchNormalization(momentum=0.8))
-        # decoder.add(Dense(512))
-        # decoder.add(LeakyReLU(alpha=0.2))
-        # decoder.add(BatchNormalization(momentum=0.8))
-        # decoder.add(Dense(np.prod(self.img_shape), activation='tanh'))
-        # decoder.add(Reshape(self.img_shape))
-        #
-        # decoder.summary()
-        #
-        # encoded_repr = Input(shape=(self.encoded_dim,))
-        # encoded_repr = Input(shape=(self.encoded_dim,))
-        # gen_img = decoder(encoded_repr)
-        #
-        # return Model(encoded_repr, gen_img)
         model = Sequential()
 
         model.add(Dense(512, input_dim=self.encoded_dim))
@@ -151,10 +132,9 @@ class CAAE:
 
         # rescale
         X_train = (X_train.astype(np.float32) - 127.5) / 127.5
-        X_train = np.expand_dims(X_train, axis=3)
         y_train = y_train.reshape(-1, 1)
 
-        half_batch = int(batch_size)/2
+        half_batch = int(batch_size)//2
 
         for epoch in range(epochs):
             # Train discriminator
@@ -206,8 +186,8 @@ class CAAE:
         cnt = 0
         for i in range(r):
             for j in range(c):
-                axs[i, j].imshow(gen_imgs[cnt, :, :, 0], cmap='gray')
-                axs[i, j].set_title("Digit: %d" % labels[cnt])
+                axs[i, j].imshow(gen_imgs[cnt])
+                axs[i, j].set_title("{0} - {1}".format(labels[cnt]*5, (labels[cnt]+1) * 5))
                 axs[i, j].axis('off')
                 cnt += 1
         fig.savefig("images/%d.png" % epoch)
