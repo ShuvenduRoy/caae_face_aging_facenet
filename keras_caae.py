@@ -15,6 +15,7 @@ from keras.optimizers import Adam
 from keras import losses
 from keras.utils import to_categorical
 import keras.backend as K
+from data_loader import load_data
 
 import matplotlib.pyplot as plt
 
@@ -146,7 +147,7 @@ class CAAE:
 
     def train(self, epochs, batch_size=128, save_interval=100):
         # laod data
-        (X_train, y_train), (_, _) = mnist.load_data()
+        (X_train, y_train) = load_data()
 
         # rescale
         X_train = (X_train.astype(np.float32) - 127.5) / 127.5
@@ -209,7 +210,7 @@ class CAAE:
                 axs[i, j].set_title("Digit: %d" % labels[cnt])
                 axs[i, j].axis('off')
                 cnt += 1
-        fig.savefig("caae/images/%d.png" % epoch)
+        fig.savefig("images/%d.png" % epoch)
         plt.close()
 
 
