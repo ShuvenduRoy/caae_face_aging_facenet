@@ -7,7 +7,7 @@ import cv2
 
 def load_data(size=(28, 28)):
     print("load data started")
-    all_images = glob.glob("E:\\Datasets\\UT\\*")
+    all_images = glob.glob("E:\\Datasets\\UTKFace\\*")
 
     X = []
     y = []

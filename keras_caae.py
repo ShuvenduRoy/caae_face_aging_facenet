@@ -32,7 +32,7 @@ fnet = VGGFace(include_top=False, input_shape=(128, 128, 3))
 
 
 def face_recognition_loss(img, pred):
-    return K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=1)) + keras.losses.mse(img, pred)
+    return keras.losses.mse(img, pred) # +K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=1))
 
 
 class CAAE:
@@ -41,7 +41,7 @@ class CAAE:
         self.cols = 128
         self.channels = 3
         self.img_shape = (self.rows, self.cols, self.channels)
-        self.encoded_dim = 100
+        self.encoded_dim = 1000
         self.num_classes = 10
 
         self.gf = 32
@@ -238,7 +238,22 @@ class CAAE:
         fig.savefig("images/%d.png" % epoch)
         plt.close()
 
+    def save_model(self):
+
+        def save(model, model_name):
+            model_path = "aae/saved_model/%s.json" % model_name
+            weights_path = "aae/saved_model/%s_weights.hdf5" % model_name
+            options = {"file_arch": model_path,
+                       "file_weight": weights_path}
+            json_string = model.to_json()
+            open(options['file_arch'], 'w').write(json_string)
+            model.save_weights(options['file_weight'])
+
+        save(self.generator, "aae_generator")
+        save(self.discriminator, "aae_discriminator")
+
 
 if __name__ == '__main__':
     aae = CAAE()
-    aae.train(epochs=2000, batch_size=32, save_interval=10)
+    aae.train(epochs=40000, batch_size=32, save_interval=100)
+    aae.save_model()
