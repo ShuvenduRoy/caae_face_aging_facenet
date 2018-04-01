@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import cv2
 
 
-def load_data():
+def load_data(shape):
     print("load data started")
     all_images = glob.glob("E:\\Datasets\\UTKFace\\*")
 
@@ -17,7 +17,7 @@ def load_data():
         age = int(only_name.split('_')[0])
 
         img = mpimage.imread(image)
-        img = cv2.resize(img, (64, 64))
+        img = cv2.resize(img, (shape[0], shape[1]))
 
         X.append(img)
         y.append(int(age / 5))

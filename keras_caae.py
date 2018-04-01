@@ -16,16 +16,18 @@ from keras import losses
 from keras.utils import to_categorical
 import keras.backend as K
 from data_loader import load_data
-
+from keras.models import load_model
 import matplotlib.pyplot as plt
 
 import numpy as np
 
+fnet = load_model('facenet_keras.h5')
+
 
 class CAAE:
     def __init__(self):
-        self.rows = 64
-        self.cols = 64
+        self.rows = 128
+        self.cols = 128
         self.channel = 3
         self.img_shape = (self.rows, self.cols, self.channel)
         self.encoded_dim = 100
@@ -128,7 +130,7 @@ class CAAE:
 
     def train(self, epochs, batch_size=128, save_interval=100):
         # laod data
-        (X_train, y_train) = load_data()
+        (X_train, y_train) = load_data((self.rows, self.cols))
 
         # rescale
         X_train = (X_train.astype(np.float32) - 127.5) / 127.5
