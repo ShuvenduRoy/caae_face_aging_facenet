@@ -7,12 +7,16 @@ import cv2
 
 def load_data(size=(28, 28)):
     print("load data started")
-    all_images = glob.glob("E:\\Datasets\\UTKFace\\*")
+    all_images = glob.glob("E:\\Datasets\\UT\\*")
 
     X = []
     y = []
 
-    for image in all_images:
+    for i, image in enumerate(all_images):
+        # # take half data
+        # if i%20 != 0:
+        #     continue
+
         only_name = image.split('\\')[-1]
         age = int(only_name.split('_')[0])
 

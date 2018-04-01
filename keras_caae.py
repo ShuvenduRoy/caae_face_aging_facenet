@@ -1,37 +1,51 @@
 # Conditional adversarial autoencoder
 import keras
-from keras.datasets import mnist
 import keras.models as models
 import keras.layers as layers
-import keras.losses as losses
 import keras.metrics as metrices
 from keras.layers import Input, Dense, Reshape, Flatten, Dropout, multiply, GaussianNoise
 from keras.layers import BatchNormalization, Activation, Embedding, ZeroPadding2D
-from keras.layers import MaxPooling2D
-from keras.layers.advanced_activations import LeakyReLU
-from keras.layers.convolutional import UpSampling2D, Conv2D
-from keras.models import Sequential, Model
-from keras.optimizers import Adam
 from keras import losses
 from keras.utils import to_categorical
 import keras.backend as K
 from data_loader import load_data
 from keras.models import load_model
 import matplotlib.pyplot as plt
-
+from keras_contrib.layers.normalization import InstanceNormalization
+from keras.layers import Input, Dense, Reshape, Flatten, Dropout, Concatenate
+from keras.layers import BatchNormalization, Activation, ZeroPadding2D
+from keras.layers.advanced_activations import LeakyReLU
+from keras.layers.convolutional import UpSampling2D, Conv2D
+from keras.models import Sequential, Model
+from keras.optimizers import Adam
+import datetime
+import sys
+import tensorflow as tf
 import numpy as np
 
-fnet = load_model('facenet_keras.h5')
+from keras.preprocessing import image
+from keras_vggface.vggface import VGGFace
+from keras_vggface import utils
+
+# facenet
+fnet = VGGFace(include_top=False, input_shape=(128, 128, 3))
+
+
+def face_recognition_loss(img, pred):
+    return K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=1)) + keras.losses.mse(img, pred)
 
 
 class CAAE:
     def __init__(self):
         self.rows = 128
         self.cols = 128
-        self.channel = 3
-        self.img_shape = (self.rows, self.cols, self.channel)
+        self.channels = 3
+        self.img_shape = (self.rows, self.cols, self.channels)
         self.encoded_dim = 100
         self.num_classes = 10
+
+        self.gf = 32
+        self.df = 64
 
         # optimizer
         optimizer = keras.optimizers.Adam(0.0002, 0.5)
@@ -47,7 +61,7 @@ class CAAE:
 
         # decoder
         self.decoder = self.build_decoder()
-        self.decoder.compile(loss=['mse'], optimizer=optimizer)
+        self.decoder.compile(loss=[face_recognition_loss], optimizer=optimizer)
 
         img = Input(shape=self.img_shape)
         encoded = self.encoder(img)
@@ -61,7 +75,7 @@ class CAAE:
         validity = self.discriminator(encoded)
 
         self.adversarial_autoencoder = Model([img, label], [decoded, validity])
-        self.adversarial_autoencoder.compile(loss=['mse', 'binary_crossentropy'],
+        self.adversarial_autoencoder.compile(loss=[face_recognition_loss, 'binary_crossentropy'],
                                              loss_weights=[0.999, 0.001],
                                              optimizer=optimizer)
 
@@ -85,38 +99,40 @@ class CAAE:
 
     def build_encoder(self):
         # Encoder
-        encoder = Sequential()
+        def conv2d(layer_input, filters, f_size=4):
+            """Layers used during downsampling"""
+            d = Conv2D(filters, kernel_size=f_size, strides=2, padding='same')(layer_input)
+            d = LeakyReLU(alpha=0.2)(d)
+            d = InstanceNormalization()(d)
+            return d
 
-        encoder.add(Flatten(input_shape=self.img_shape))
-        encoder.add(Dense(512))
-        encoder.add(LeakyReLU(alpha=0.2))
-        encoder.add(BatchNormalization(momentum=0.8))
-        encoder.add(Dense(512))
-        encoder.add(LeakyReLU(alpha=0.2))
-        encoder.add(BatchNormalization(momentum=0.8))
-        encoder.add(Dense(self.encoded_dim))
+        def deconv2d(layer_input, skip_input, filters, f_size=4, dropout_rate=0):
+            """Layers used during upsampling"""
+            u = UpSampling2D(size=2)(layer_input)
+            u = Conv2D(filters, kernel_size=f_size, strides=1, padding='same', activation='relu')(u)
+            if dropout_rate:
+                u = Dropout(dropout_rate)(u)
+            u = InstanceNormalization()(u)
+            u = Concatenate()([u, skip_input])
+            return u
 
-        encoder.summary()
+            # Image input
 
-        img = Input(shape=self.img_shape)
-        encoded_repr = encoder(img)
+        d0 = Input(shape=self.img_shape)
 
-        return Model(img, encoded_repr)
+        # Downsampling
+        d1 = conv2d(d0, self.gf)
+        d2 = conv2d(d1, self.gf * 2)
+        d3 = conv2d(d2, self.gf * 4)
+        output_img = conv2d(d3, self.gf * 8)
+        output_img = layers.Flatten()(output_img)
+        encoded = Dense(self.encoded_dim)(output_img)
+
+        Model(d0, encoded).summary()
+
+        return Model(d0, encoded)
 
     def build_decoder(self):
-        model = Sequential()
-
-        model.add(Dense(512, input_dim=self.encoded_dim))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(Dense(1024))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(Dense(np.prod(self.img_shape), activation='tanh'))
-        model.add(Reshape(self.img_shape))
-
-        model.summary()
-
         noise = Input(shape=(self.encoded_dim,))
         label = Input(shape=(1,), dtype='int32')
 
@@ -124,9 +140,36 @@ class CAAE:
 
         model_input = multiply([noise, label_embedding])
 
-        img = model(model_input)
+        # output_img = model(model_input)
 
-        return Model([noise, label], img)
+        def conv2d(layer_input, filters, f_size=4):
+            """Layers used during downsampling"""
+            d = Conv2D(filters, kernel_size=f_size, strides=2, padding='same')(layer_input)
+            d = LeakyReLU(alpha=0.2)(d)
+            d = InstanceNormalization()(d)
+            return d
+
+        def deconv2d(layer_input, filters, f_size=4, dropout_rate=0):
+            """Layers used during upsampling"""
+            u = UpSampling2D(size=2)(layer_input)
+            u = Conv2D(filters, kernel_size=f_size, strides=1, padding='same', activation='relu')(u)
+            if dropout_rate:
+                u = Dropout(dropout_rate)(u)
+            u = InstanceNormalization()(u)
+            return u
+
+        # Upsampling
+        model_input = layers.Dense(8 * 8 * 256)(model_input)
+        model_input = layers.Reshape((8, 8, 256))(model_input)
+        u1 = deconv2d(model_input, self.gf * 4)
+        u2 = deconv2d(u1, self.gf * 2)
+        u3 = deconv2d(u2, self.gf)
+
+        u4 = UpSampling2D(size=2)(u3)
+        output_img = Conv2D(self.channels, kernel_size=4, strides=1, padding='same', activation='tanh')(u4)
+        Model([noise, label], output_img).summary()
+
+        return Model([noise, label], output_img)
 
     def train(self, epochs, batch_size=128, save_interval=100):
         # laod data
@@ -136,7 +179,7 @@ class CAAE:
         X_train = (X_train.astype(np.float32) - 127.5) / 127.5
         y_train = y_train.reshape(-1, 1)
 
-        half_batch = int(batch_size)//2
+        half_batch = int(batch_size) // 2
 
         for epoch in range(epochs):
             # Train discriminator
@@ -166,7 +209,7 @@ class CAAE:
 
             # Plot the progress
             print("%d [D loss: %f, acc: %.2f%%] [G loss: %f, mse: %f]" % (
-            epoch, d_loss[0], 100 * d_loss[1], g_loss[0], g_loss[1]))
+                epoch, d_loss[0], 100 * d_loss[1], g_loss[0], g_loss[1]))
 
             # If at save interval => save generated image samples
             if epoch % save_interval == 0:
@@ -189,7 +232,7 @@ class CAAE:
         for i in range(r):
             for j in range(c):
                 axs[i, j].imshow(gen_imgs[cnt])
-                axs[i, j].set_title("{0} - {1}".format(labels[cnt]*5, (labels[cnt]+1) * 5))
+                axs[i, j].set_title("{0} - {1}".format(labels[cnt] * 5, (labels[cnt] + 1) * 5))
                 axs[i, j].axis('off')
                 cnt += 1
         fig.savefig("images/%d.png" % epoch)
@@ -198,4 +241,4 @@ class CAAE:
 
 if __name__ == '__main__':
     aae = CAAE()
-    aae.train(epochs=20000, batch_size=32, save_interval=200)
+    aae.train(epochs=2000, batch_size=32, save_interval=10)
