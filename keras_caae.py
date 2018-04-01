@@ -1,38 +1,28 @@
 # Conditional adversarial autoencoder
 import keras
-import keras.models as models
 import keras.layers as layers
 import keras.metrics as metrices
-from keras.layers import Input, Dense, Reshape, Flatten, Dropout, multiply, GaussianNoise
-from keras.layers import BatchNormalization, Activation, Embedding, ZeroPadding2D
-from keras import losses
-from keras.utils import to_categorical
-import keras.backend as K
-from data_loader import load_data
-from keras.models import load_model
+import keras.models as models
 import matplotlib.pyplot as plt
-from keras_contrib.layers.normalization import InstanceNormalization
-from keras.layers import Input, Dense, Reshape, Flatten, Dropout, Concatenate
-from keras.layers import BatchNormalization, Activation, ZeroPadding2D
+import numpy as np
+from keras import losses
+from keras.layers import Embedding
+from keras.layers import Input, Dense, Flatten, Dropout, Concatenate
+from keras.layers import multiply
 from keras.layers.advanced_activations import LeakyReLU
 from keras.layers.convolutional import UpSampling2D, Conv2D
-from keras.models import Sequential, Model
-from keras.optimizers import Adam
-import datetime
-import sys
-import tensorflow as tf
-import numpy as np
-
-from keras.preprocessing import image
+from keras.models import Model
+from keras_contrib.layers.normalization import InstanceNormalization
 from keras_vggface.vggface import VGGFace
-from keras_vggface import utils
+import keras.backend as K
+from data_loader import load_data
 
 # facenet
 fnet = VGGFace(include_top=False, input_shape=(128, 128, 3))
 
 
 def face_recognition_loss(img, pred):
-    return keras.losses.mse(img, pred) # +K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=1))
+    return keras.losses.mse(img, pred) + K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=1))
 
 
 class CAAE:
@@ -255,5 +245,5 @@ class CAAE:
 
 if __name__ == '__main__':
     aae = CAAE()
-    aae.train(epochs=40000, batch_size=32, save_interval=100)
+    aae.train(epochs=30000, batch_size=32, save_interval=100)
     aae.save_model()
