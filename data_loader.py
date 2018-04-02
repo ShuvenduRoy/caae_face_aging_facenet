@@ -24,7 +24,7 @@ def UTKFace_data(size=(128, 128)):
         img = cv2.resize(img, (size[0], size[1]))
 
         X.append(img)
-        y.append(int(age / 5))
+        y.append(min(int(age / 5), 19))
 
     X = np.array(X).astype(np.float32)
     y = np.array(y).astype(np.int)
