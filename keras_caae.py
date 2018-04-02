@@ -233,7 +233,7 @@ class CAAE:
             d_loss = 0.5 * np.add(d_loss_fake, d_loss_real)
 
             # img discriminator trained (helps generated image look more realistic)
-            gen_imgs = self.decoder.predict(encoded_images)
+            gen_imgs = self.decoder.predict([encoded_images, labels])
 
             di_loss_real = self.img_discriminator.train_on_batch(images, np.ones((half_batch, 1)))
             di_loss_fake = self.img_discriminator.train_on_batch(gen_imgs, np.zeros((half_batch, 1)))
