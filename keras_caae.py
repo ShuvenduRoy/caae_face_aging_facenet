@@ -1,4 +1,3 @@
-# Conditional adversarial autoencoder
 import keras
 import keras.layers as layers
 import keras.metrics as metrices
@@ -6,34 +5,33 @@ import keras.models as models
 import matplotlib.pyplot as plt
 import numpy as np
 from keras import losses
-from keras.layers import Embedding, BatchNormalization, ZeroPadding2D
-from keras.layers import Input, Dense, Flatten, Dropout, Concatenate
-from keras.layers import multiply
+from keras.layers import Embedding
+from keras.layers import Input, Dense, Flatten, Dropout, multiply
 from keras.layers.advanced_activations import LeakyReLU
 from keras.layers.convolutional import UpSampling2D, Conv2D
 from keras.models import Model
-from keras_contrib.layers.normalization import InstanceNormalization
-from keras_vggface.vggface import VGGFace
+from keras_contrib.layers import InstanceNormalization
+from keras_vggface import VGGFace
 import keras.backend as K
-from data_loader import load_data
+from data_loader import UTKFace_data
 
-# facenet
 fnet = VGGFace(include_top=False, input_shape=(128, 128, 3))
 fnet.trainable = False
 
 
 def face_recognition_loss(img, pred):
-    return K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=1)) # + keras.losses.mse(img, pred)
+    return K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=1))
 
 
-class CAAE:
-    def __init__(self):
-        self.rows = 128
-        self.cols = 128
-        self.channels = 3
+class AAE:
+    def __init__(self, r, c, h, e_dim, dataset="mnist"):
+        self.rows = r
+        self.cols = c
+        self.channels = h
         self.img_shape = (self.rows, self.cols, self.channels)
-        self.encoded_dim = 1000
-        self.num_classes = 10
+        self.encoded_dim = e_dim
+        self.num_classes = 25
+        self.dataset = dataset
 
         self.gf = 32
         self.df = 64
@@ -42,12 +40,9 @@ class CAAE:
         optimizer = keras.optimizers.Adam(0.0002, 0.5)
 
         # discriminator
-        self.img_discriminator = self.build_img_discriminator()
-        self.img_discriminator.compile(optimizer=optimizer, loss=losses.binary_crossentropy)
-
-        self.z_discriminator = self.build_Z_discriminator()
-        self.z_discriminator.compile(optimizer=optimizer, loss=losses.binary_crossentropy,
-                                     metrics=[metrices.binary_accuracy])
+        self.discriminator = self.build_discriminator()
+        self.discriminator.compile(optimizer=optimizer, loss=losses.binary_crossentropy,
+                                   metrics=[metrices.binary_accuracy])
 
         # encoder
         self.encoder = self.build_encoder()
@@ -58,60 +53,20 @@ class CAAE:
         self.decoder.compile(loss=[face_recognition_loss], optimizer=optimizer)
 
         img = Input(shape=self.img_shape)
-        encoded = self.encoder(img)
-
         label = Input(shape=(1,))
+        encoded = self.encoder(img)
         decoded = self.decoder([encoded, label])
-        # decoded = self.decoder(encoded)
 
-        self.z_discriminator.trainable = False
-        self.img_discriminator.trainable = False
+        self.discriminator.trainable = False
 
-        z_validity = self.z_discriminator(encoded)
-        img_validity = self.img_discriminator(decoded)
+        validity = self.discriminator(encoded)
 
-        self.adversarial_autoencoder = Model([img, label], [decoded, z_validity, img_validity])
-        self.adversarial_autoencoder.compile(loss=[face_recognition_loss, 'binary_crossentropy', 'binary_crossentropy'],
-                                             # loss_weights=[0.999, 0.001],
+        self.adversarial_autoencoder = Model([img, label], [decoded, validity])
+        self.adversarial_autoencoder.compile(loss=['mse', 'binary_crossentropy'],
+                                             loss_weights=[0.999, 0.001],
                                              optimizer=optimizer)
 
-    def build_img_discriminator(self):
-        img_shape = (self.rows, self.cols, self.channels)
-
-        model = models.Sequential()
-
-        model.add(Conv2D(32, kernel_size=3, strides=2, input_shape=img_shape, padding="same"))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dropout(0.25))
-
-        model.add(Conv2D(64, kernel_size=3, strides=2, padding="same"))
-        model.add(ZeroPadding2D(padding=((0, 1), (0, 1))))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dropout(0.25))
-        model.add(BatchNormalization(momentum=0.8))
-
-        model.add(Conv2D(128, kernel_size=3, strides=2, padding="same"))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dropout(0.25))
-        model.add(BatchNormalization(momentum=0.8))
-
-        model.add(Conv2D(256, kernel_size=3, strides=2, padding="same"))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dropout(0.25))
-
-        model.add(Flatten())
-        model.add(Dense(1000, activation='relu'))
-        model.add(Dense(1, activation='sigmoid'))
-
-        model.summary()
-
-        img = Input(shape=img_shape)
-        validity = model(img)
-        Model(img, validity).summary()
-
-        return Model(img, validity)
-
-    def build_Z_discriminator(self):
+    def build_discriminator(self):
         model = models.Sequential()
 
         model.add(layers.Dense(512, input_dim=self.encoded_dim))
@@ -145,7 +100,7 @@ class CAAE:
             if dropout_rate:
                 u = Dropout(dropout_rate)(u)
             u = InstanceNormalization()(u)
-            u = Concatenate()([u, skip_input])
+            u = layers.Concatenate()([u, skip_input])
             return u
 
             # Image input
@@ -205,10 +160,12 @@ class CAAE:
 
     def train(self, epochs, batch_size=128, save_interval=100):
         # laod data
-        (X_train, y_train) = load_data((self.rows, self.cols))
+        (X_train, y_train) = UTKFace_data()
 
         # rescale
         X_train = (X_train.astype(np.float32) - 127.5) / 127.5
+        if self.dataset == 'mnist':
+            X_train = np.expand_dims(X_train, axis=3)
         y_train = y_train.reshape(-1, 1)
 
         half_batch = int(batch_size) // 2
@@ -216,7 +173,8 @@ class CAAE:
         for epoch in range(epochs):
             # Train discriminator
             idx = np.random.randint(0, X_train.shape[0], half_batch)
-            images, labels = X_train[idx], y_train[idx]
+            images = X_train[idx]
+            labels = y_train[idx]
 
             # encode this images
             encoded_images = self.encoder.predict(images)  # latent fake
@@ -227,25 +185,17 @@ class CAAE:
             valid = np.ones((half_batch, 1))
             fake = np.zeros((half_batch, 1))
 
-            # z discriminator trained
-            d_loss_real = self.z_discriminator.train_on_batch(latent_real, valid)
-            d_loss_fake = self.z_discriminator.train_on_batch(encoded_images, fake)
+            d_loss_real = self.discriminator.train_on_batch(latent_real, valid)
+            d_loss_fake = self.discriminator.train_on_batch(encoded_images, fake)
             d_loss = 0.5 * np.add(d_loss_fake, d_loss_real)
-
-            # img discriminator trained (helps generated image look more realistic)
-            gen_imgs = self.decoder.predict([encoded_images, labels])
-
-            di_loss_real = self.img_discriminator.train_on_batch(images, np.ones((half_batch, 1)))
-            di_loss_fake = self.img_discriminator.train_on_batch(gen_imgs, np.zeros((half_batch, 1)))
-            di_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
             # Train generator
             idx = np.random.randint(0, X_train.shape[0], half_batch)
-            images, labels = X_train[idx], y_train[idx]
+            images = X_train[idx]
 
             valid_y = np.ones((half_batch, 1))
 
-            g_loss = self.adversarial_autoencoder.train_on_batch([images, labels], [images, valid_y, valid_y])
+            g_loss = self.adversarial_autoencoder.train_on_batch([images, labels], [images, valid_y])
 
             # Plot the progress
             print("%d [D loss: %f, acc: %.2f%%] [G loss: %f, mse: %f]" % (
@@ -254,12 +204,13 @@ class CAAE:
             # If at save interval => save generated image samples
             if epoch % save_interval == 0:
                 # Select a random half batch of images
-                idx = np.random.randint(0, X_train.shape[0], 10)
-                images, labels = X_train[idx], y_train[idx]
-                self.save_imgs(epoch, images, labels)
+                idx = np.random.randint(0, X_train.shape[0], 25)
+                imgs = X_train[idx]
+                labels = y_train[idx]
+                self.save_imgs(epoch, imgs, labels)
 
     def save_imgs(self, epoch, imgs, labels):
-        r, c = 2, 5
+        r, c = 5, 5
 
         encoded_imgs = self.encoder.predict(imgs)
         gen_imgs = self.decoder.predict([encoded_imgs, labels])
@@ -267,33 +218,45 @@ class CAAE:
         gen_imgs = 0.5 * gen_imgs + 0.5
 
         fig, axs = plt.subplots(r, c)
-        fig.suptitle("CGAN: Generated digits", fontsize=12)
         cnt = 0
         for i in range(r):
             for j in range(c):
-                axs[i, j].imshow(gen_imgs[cnt])
-                axs[i, j].set_title("{0} - {1}".format(labels[cnt] * 5, (labels[cnt] + 1) * 5))
+                axs[i, j].imshow(gen_imgs[cnt, :, :, :])
                 axs[i, j].axis('off')
                 cnt += 1
-        fig.savefig("images/%d.png" % epoch)
+        fig.savefig("images/" + self.dataset + "/%d.png" % epoch)
+
         plt.close()
 
-    def save_model(self):
+        # plt the aging effect
+        r, c = 2, 6
+        image = np.empty(shape=(c, self.rows, self.cols, self.channels))
+        for i in range(c):
+            image[i] = imgs[0]
+        labels = np.array([2, 4, 7, 10, 14, 21]).reshape(c, 1)  # 10, 20, 35, 50, 70, 100
+        ages = [10, 20, 35, 50, 70, 100]
 
-        def save(model, model_name):
-            model_path = "aae/saved_model/%s.json" % model_name
-            weights_path = "aae/saved_model/%s_weights.hdf5" % model_name
-            options = {"file_arch": model_path,
-                       "file_weight": weights_path}
-            json_string = model.to_json()
-            open(options['file_arch'], 'w').write(json_string)
-            model.save_weights(options['file_weight'])
+        encoded_imgs = self.encoder.predict(image)
+        gen_imgs = self.decoder.predict([encoded_imgs, labels])
 
-        save(self.generator, "aae_generator")
-        save(self.z_discriminator, "aae_discriminator")
+        gen_imgs = 0.5 * gen_imgs + 0.5
+
+        fig, axs = plt.subplots(r, c)
+
+        for i in range(c):
+            axs[0, i].imshow(image[i, :, :, :])
+            axs[0, i].axis('off')
+
+        for i in range(c):
+            axs[1, i].imshow(gen_imgs[i, :, :, :])
+            axs[1, i].set_title(str(ages[i]))
+            axs[1, i].axis('off')
+
+        fig.savefig("images/" + self.dataset + "/%d_aged.png" % epoch)
+
+        plt.close()
 
 
 if __name__ == '__main__':
-    aae = CAAE()
-    aae.train(epochs=30000, batch_size=32, save_interval=100)
-    aae.save_model()
+    aae = AAE(128, 128, 3, 1000, "face_aging")
+    aae.train(epochs=20000, batch_size=32, save_interval=200)
