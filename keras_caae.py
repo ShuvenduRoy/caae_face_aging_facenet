@@ -6,7 +6,7 @@ import keras.models as models
 import matplotlib.pyplot as plt
 import numpy as np
 from keras import losses
-from keras.layers import Embedding
+from keras.layers import Embedding, BatchNormalization, ZeroPadding2D
 from keras.layers import Input, Dense, Flatten, Dropout, Concatenate
 from keras.layers import multiply
 from keras.layers.advanced_activations import LeakyReLU
@@ -19,10 +19,11 @@ from data_loader import load_data
 
 # facenet
 fnet = VGGFace(include_top=False, input_shape=(128, 128, 3))
+fnet.trainable = False
 
 
 def face_recognition_loss(img, pred):
-    return keras.losses.mse(img, pred) + K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=1))
+    return K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=1)) # + keras.losses.mse(img, pred)
 
 
 class CAAE:
@@ -41,9 +42,12 @@ class CAAE:
         optimizer = keras.optimizers.Adam(0.0002, 0.5)
 
         # discriminator
-        self.discriminator = self.build_discriminator()
-        self.discriminator.compile(optimizer=optimizer, loss=losses.binary_crossentropy,
-                                   metrics=[metrices.binary_accuracy])
+        self.img_discriminator = self.build_img_discriminator()
+        self.img_discriminator.compile(optimizer=optimizer, loss=losses.binary_crossentropy)
+
+        self.z_discriminator = self.build_Z_discriminator()
+        self.z_discriminator.compile(optimizer=optimizer, loss=losses.binary_crossentropy,
+                                     metrics=[metrices.binary_accuracy])
 
         # encoder
         self.encoder = self.build_encoder()
@@ -60,16 +64,54 @@ class CAAE:
         decoded = self.decoder([encoded, label])
         # decoded = self.decoder(encoded)
 
-        self.discriminator.trainable = False
+        self.z_discriminator.trainable = False
+        self.img_discriminator.trainable = False
 
-        validity = self.discriminator(encoded)
+        z_validity = self.z_discriminator(encoded)
+        img_validity = self.img_discriminator(decoded)
 
-        self.adversarial_autoencoder = Model([img, label], [decoded, validity])
-        self.adversarial_autoencoder.compile(loss=[face_recognition_loss, 'binary_crossentropy'],
-                                             loss_weights=[0.999, 0.001],
+        self.adversarial_autoencoder = Model([img, label], [decoded, z_validity, img_validity])
+        self.adversarial_autoencoder.compile(loss=[face_recognition_loss, 'binary_crossentropy', 'binary_crossentropy'],
+                                             # loss_weights=[0.999, 0.001],
                                              optimizer=optimizer)
 
-    def build_discriminator(self):
+    def build_img_discriminator(self):
+        img_shape = (self.rows, self.cols, self.channels)
+
+        model = models.Sequential()
+
+        model.add(Conv2D(32, kernel_size=3, strides=2, input_shape=img_shape, padding="same"))
+        model.add(LeakyReLU(alpha=0.2))
+        model.add(Dropout(0.25))
+
+        model.add(Conv2D(64, kernel_size=3, strides=2, padding="same"))
+        model.add(ZeroPadding2D(padding=((0, 1), (0, 1))))
+        model.add(LeakyReLU(alpha=0.2))
+        model.add(Dropout(0.25))
+        model.add(BatchNormalization(momentum=0.8))
+
+        model.add(Conv2D(128, kernel_size=3, strides=2, padding="same"))
+        model.add(LeakyReLU(alpha=0.2))
+        model.add(Dropout(0.25))
+        model.add(BatchNormalization(momentum=0.8))
+
+        model.add(Conv2D(256, kernel_size=3, strides=2, padding="same"))
+        model.add(LeakyReLU(alpha=0.2))
+        model.add(Dropout(0.25))
+
+        model.add(Flatten())
+        model.add(Dense(1000, activation='relu'))
+        model.add(Dense(1, activation='sigmoid'))
+
+        model.summary()
+
+        img = Input(shape=img_shape)
+        validity = model(img)
+        Model(img, validity).summary()
+
+        return Model(img, validity)
+
+    def build_Z_discriminator(self):
         model = models.Sequential()
 
         model.add(layers.Dense(512, input_dim=self.encoded_dim))
@@ -185,9 +227,17 @@ class CAAE:
             valid = np.ones((half_batch, 1))
             fake = np.zeros((half_batch, 1))
 
-            d_loss_real = self.discriminator.train_on_batch(latent_real, valid)
-            d_loss_fake = self.discriminator.train_on_batch(encoded_images, fake)
+            # z discriminator trained
+            d_loss_real = self.z_discriminator.train_on_batch(latent_real, valid)
+            d_loss_fake = self.z_discriminator.train_on_batch(encoded_images, fake)
             d_loss = 0.5 * np.add(d_loss_fake, d_loss_real)
+
+            # img discriminator trained (helps generated image look more realistic)
+            gen_imgs = self.decoder.predict(encoded_images)
+
+            di_loss_real = self.img_discriminator.train_on_batch(images, np.ones((half_batch, 1)))
+            di_loss_fake = self.img_discriminator.train_on_batch(gen_imgs, np.zeros((half_batch, 1)))
+            di_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
             # Train generator
             idx = np.random.randint(0, X_train.shape[0], half_batch)
@@ -195,7 +245,7 @@ class CAAE:
 
             valid_y = np.ones((half_batch, 1))
 
-            g_loss = self.adversarial_autoencoder.train_on_batch([images, labels], [images, valid_y])
+            g_loss = self.adversarial_autoencoder.train_on_batch([images, labels], [images, valid_y, valid_y])
 
             # Plot the progress
             print("%d [D loss: %f, acc: %.2f%%] [G loss: %f, mse: %f]" % (
@@ -240,7 +290,7 @@ class CAAE:
             model.save_weights(options['file_weight'])
 
         save(self.generator, "aae_generator")
-        save(self.discriminator, "aae_discriminator")
+        save(self.z_discriminator, "aae_discriminator")
 
 
 if __name__ == '__main__':
