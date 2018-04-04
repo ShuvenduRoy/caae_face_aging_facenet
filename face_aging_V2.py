@@ -1,3 +1,5 @@
+# Try inception loss
+
 import keras
 import keras.layers as layers
 import keras.metrics as metrices
@@ -15,12 +17,15 @@ from data_loader import UTKFace_male_5cat
 import matplotlib.image as mpimage
 import keras.backend as K
 
-from fr_utils import *
-from inception_blocks_v2 import *
+inception_model = keras.applications.inception_v3.InceptionV3(include_top=False, weights='imagenet', input_tensor=None,
+                                                              input_shape=(160, 160, 3), pooling=None, classes=1000)
+inception_model.trainable = False
+inception_model.summary()
 
 
 def face_recognition_loss(img, pred):
-    return keras.losses.mse(img, pred) # fr_loss(img, pred)  # K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=-1)) #
+    # return keras.losses.mse(img, pred) # fr_loss(img, pred)  # K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=-1)) #
+    return K.mean(K.reshape(K.square(inception_model(img) - inception_model(pred)), shape=(-1, 3 * 3 * 2048)), axis=-1)
 
 
 class AAE:
@@ -28,7 +33,7 @@ class AAE:
         self.rows = r
         self.cols = c
         self.channels = h
-        self.img_shape = (self.channels, self.rows, self.cols)
+        self.img_shape = (self.rows, self.cols, self.channels)
         self.encoded_dim = e_dim
         self.num_classes = num_classes
         self.dataset = dataset
@@ -146,8 +151,8 @@ class AAE:
             return u
 
         # Upsampling
-        model_input = layers.Dense(6 * 6 * 256)(model_input)
-        model_input = layers.Reshape((256, 6, 6))(model_input)
+        model_input = layers.Dense(10 * 10 * 256)(model_input)
+        model_input = layers.Reshape((10, 10, 256))(model_input)
         u1 = deconv2d(model_input, self.gf * 4)
         u2 = deconv2d(u1, self.gf * 2)
         u3 = deconv2d(u2, self.gf)
@@ -195,7 +200,7 @@ class AAE:
 
             valid_y = np.ones((half_batch, 1))
 
-            g_loss = self.adversarial_autoencoder.train_on_batch([images, labels], [np.zeros((half_batch, 1)), valid_y])
+            g_loss = self.adversarial_autoencoder.train_on_batch([images, labels], [images, valid_y])
 
             # Plot the progress
             print("%d [D loss: %f, acc: %.2f%%] [G loss: %f, mse: %f]" % (
@@ -239,7 +244,6 @@ class AAE:
         encoded_imgs = self.encoder.predict(image)
         gen_imgs = self.decoder.predict([encoded_imgs, labels])
 
-
         gen_imgs = 0.5 * gen_imgs + 0.5
         image = 0.5 * image + 0.5
 
@@ -260,5 +264,5 @@ class AAE:
 
 
 if __name__ == '__main__':
-    aae = AAE(96, 96, 3, 5, 100, "face_aging_mse")
-    # aae.train(epochs=1000, batch_size=32, save_interval=100)
+    aae = AAE(160, 160, 3, 5, 100, "face_aging_inception")
+    aae.train(epochs=40000, batch_size=32, save_interval=100)
