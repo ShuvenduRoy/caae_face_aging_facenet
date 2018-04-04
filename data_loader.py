@@ -139,9 +139,10 @@ def UTKFace_male_5cat_channels_first(size=(128, 128)):
         if gender == 0:
             img = mpimage.imread(image)
             img = cv2.resize(img, (size[0], size[1]))
-            img = img[..., ::-1]
-            img = np.around(np.transpose(img, (2, 0, 1)) / 255.0, decimals=12)
+            # img = img[..., ::-1]
+            # img = np.around(np.transpose(img, (2, 0, 1)) / 255.0, decimals=12)
 
+            img = np.transpose(img, (2, 0, 1))
             X.append(img)
 
             age_class = 0
