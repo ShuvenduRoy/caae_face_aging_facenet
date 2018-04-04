@@ -20,17 +20,17 @@ fnet.trainable = False
 
 
 def face_recognition_loss(img, pred):
-    return keras.losses.mse # K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=-1))
+    return keras.losses.mse(img, pred) # K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=-1))
 
 
 class AAE:
-    def __init__(self, r, c, h, e_dim, dataset="mnist"):
+    def __init__(self, r, c, h, num_classes, e_dim, dataset="mnist"):
         self.rows = r
         self.cols = c
         self.channels = h
         self.img_shape = (self.rows, self.cols, self.channels)
         self.encoded_dim = e_dim
-        self.num_classes = 25
+        self.num_classes = num_classes
         self.dataset = dataset
 
         self.gf = 32
@@ -202,12 +202,12 @@ class AAE:
                 epoch, d_loss[0], 100 * d_loss[1], g_loss[0], g_loss[1]))
 
             # If at save interval => save generated image samples
-            if epoch % save_interval == 0:
+            if (epoch+1) % save_interval == 0:
                 # Select a random half batch of images
                 idx = np.random.randint(0, X_train.shape[0], 25)
                 imgs = X_train[idx]
                 labels = y_train[idx]
-                self.save_imgs(epoch, imgs, labels)
+                self.save_imgs(epoch+1, imgs, labels)
 
     def save_imgs(self, epoch, imgs, labels):
         r, c = 5, 5
@@ -229,12 +229,12 @@ class AAE:
         plt.close()
 
         # plt the aging effect
-        r, c = 2, 6
+        r, c = 2, 5
         image = np.empty(shape=(c, self.rows, self.cols, self.channels))
         for i in range(c):
             image[i] = imgs[0]
-        labels = np.array([0, 4, 8, 12, 16, 19]).reshape(c, 1)  # 5, 20, 40, 60, 80, 100
-        ages = [5, 20, 40, 60, 80, 100]
+        labels = np.array([0, 1, 2, 3, 4]).reshape(c, 1)  # 5, 20, 40, 60, 80, 100
+        ages = ['0-18', '18-30', '30-50', '50-65', '65+']
 
         encoded_imgs = self.encoder.predict(image)
         gen_imgs = self.decoder.predict([encoded_imgs, labels])
@@ -259,5 +259,5 @@ class AAE:
 
 
 if __name__ == '__main__':
-    aae = AAE(96, 96, 3, 100, "face_aging_vggnet")
-    # aae.train(epochs=40000, batch_size=32, save_interval=100)
+    aae = AAE(96, 96, 3, 5, 100, "face_aging_mse")
+    aae.train(epochs=1000, batch_size=32, save_interval=100)
