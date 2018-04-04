@@ -20,7 +20,7 @@ fnet.trainable = False
 
 
 def face_recognition_loss(img, pred):
-    return K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=1))
+    return keras.losses.mse # K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=-1))
 
 
 class AAE:
@@ -62,7 +62,7 @@ class AAE:
         validity = self.discriminator(encoded)
 
         self.adversarial_autoencoder = Model([img, label], [decoded, validity])
-        self.adversarial_autoencoder.compile(loss=['mse', 'binary_crossentropy'],
+        self.adversarial_autoencoder.compile(loss=[face_recognition_loss, 'binary_crossentropy'],
                                              loss_weights=[0.999, 0.001],
                                              optimizer=optimizer)
 
@@ -146,8 +146,8 @@ class AAE:
             return u
 
         # Upsampling
-        model_input = layers.Dense(8 * 8 * 256)(model_input)
-        model_input = layers.Reshape((8, 8, 256))(model_input)
+        model_input = layers.Dense(6 * 6 * 256)(model_input)
+        model_input = layers.Reshape((6, 6, 256))(model_input)
         u1 = deconv2d(model_input, self.gf * 4)
         u2 = deconv2d(u1, self.gf * 2)
         u3 = deconv2d(u2, self.gf)
@@ -160,7 +160,7 @@ class AAE:
 
     def train(self, epochs, batch_size=128, save_interval=100):
         # laod data
-        (X_train, y_train) = UTKFace_data()
+        (X_train, y_train) = X, y  # UTKFace_data()
 
         # rescale
         X_train = (X_train.astype(np.float32) - 127.5) / 127.5
@@ -224,7 +224,7 @@ class AAE:
                 axs[i, j].imshow(gen_imgs[cnt, :, :, :])
                 axs[i, j].axis('off')
                 cnt += 1
-        fig.savefig("caae/images/" + self.dataset + "/%d.png" % epoch)
+        fig.savefig("images/" + self.dataset + "/%d.png" % epoch)
 
         plt.close()
 
@@ -253,11 +253,11 @@ class AAE:
             axs[1, i].set_title(str(ages[i]))
             axs[1, i].axis('off')
 
-        fig.savefig("caae/images/" + self.dataset + "/%d_aged.png" % epoch)
+        fig.savefig("images/" + self.dataset + "/%d_aged.png" % epoch)
 
         plt.close()
 
 
 if __name__ == '__main__':
-    aae = AAE(128, 128, 3, 100, "face_aging")
-    aae.train(epochs=40000, batch_size=32, save_interval=400)
+    aae = AAE(96, 96, 3, 100, "face_aging_vggnet")
+    # aae.train(epochs=40000, batch_size=32, save_interval=100)
