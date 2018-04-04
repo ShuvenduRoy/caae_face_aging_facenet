@@ -66,8 +66,8 @@ def img_to_encoding(image_path):
 
 
 def fr_loss(true, pred):
-    encoding_image = img_to_encoding_batch(true)
-    encoding_identity = img_to_encoding_batch(pred)
+    encoding_image = FRmodel.predict_on_batch(true)
+    encoding_identity = FRmodel.predict_on_batch(pred)
 
     # dist = np.linalg.norm(encoding_image - encoding_identity, axis=1)
     loss = K.mean(encoding_image - encoding_identity, axis=-1)

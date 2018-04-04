@@ -14,13 +14,61 @@ from keras_contrib.layers import InstanceNormalization
 from data_loader import UTKFace_male_5cat
 
 import keras.backend as K
-K.set_image_data_format('channels_first')
 
-#from fr_loss import fr_loss
+K.set_image_data_format('channels_first')
+from keras import backend as K
+
+K.set_image_data_format('channels_first')
+from fr_utils import *
+from inception_blocks_v2 import *
+
+
+def triplet_loss(y_true, y_pred, alpha=0.2):
+    """
+    Implementation of the triplet loss as defined by formula (3)
+
+    Arguments:
+    y_true -- true labels, required when you define a loss in Keras, you don't need it in this function.
+    y_pred -- python list containing three objects:
+            anchor -- the encodings for the anchor images, of shape (None, 128)
+            positive -- the encodings for the positive images, of shape (None, 128)
+            negative -- the encodings for the negative images, of shape (None, 128)
+
+    Returns:
+    loss -- real number, value of the loss
+    """
+
+    anchor, positive, negative = y_pred[0], y_pred[1], y_pred[2]
+
+    # Step 1: Compute the (encoding) distance between the anchor and the positive
+    pos_dist = tf.reduce_sum(tf.square(tf.subtract(anchor, positive)))
+    # Step 2: Compute the (encoding) distance between the anchor and the negative
+    neg_dist = tf.reduce_sum(tf.square(tf.subtract(anchor, negative)))
+    # Step 3: subtract the two previous distances and add alpha.
+    basic_loss = tf.add(tf.subtract(pos_dist, neg_dist), alpha)
+    # Step 4: Take the maximum of basic_loss and 0.0. Sum over the training examples.
+    loss = tf.maximum(tf.reduce_mean(basic_loss), 0.0)
+
+    return loss
+
+
+FRmodel = faceRecoModel(input_shape=(3, 96, 96))
+FRmodel.compile(optimizer='adam', loss=triplet_loss, metrics=['accuracy'])
+load_weights_from_FaceNet(FRmodel)
+FRmodel.trainable = False
+
+
+def fr_loss(true, pred):
+    encoding_image = FRmodel.predict_on_batch(true)
+    encoding_identity = FRmodel.predict_on_batch(pred)
+
+    # dist = np.linalg.norm(encoding_image - encoding_identity, axis=1)
+    loss = K.mean(encoding_image - encoding_identity, axis=-1)
+    return loss
 
 
 def face_recognition_loss(img, pred):
-    return keras.losses.mse(img, pred) # fr_loss(img, pred) # K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=-1))
+    return fr_loss(img, pred)  # K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=-1)) # keras.losses.mse(img, pred)
 
 
 class AAE:
@@ -202,12 +250,12 @@ class AAE:
                 epoch, d_loss[0], 100 * d_loss[1], g_loss[0], g_loss[1]))
 
             # If at save interval => save generated image samples
-            if (epoch+1) % save_interval == 0:
+            if (epoch + 1) % save_interval == 0:
                 # Select a random half batch of images
                 idx = np.random.randint(0, X_train.shape[0], 25)
                 imgs = X_train[idx]
                 labels = y_train[idx]
-                self.save_imgs(epoch+1, imgs, labels)
+                self.save_imgs(epoch + 1, imgs, labels)
 
     def save_imgs(self, epoch, imgs, labels):
         r, c = 5, 5
