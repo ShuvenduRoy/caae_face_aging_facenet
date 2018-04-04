@@ -11,16 +11,16 @@ from keras.layers.advanced_activations import LeakyReLU
 from keras.layers.convolutional import UpSampling2D, Conv2D
 from keras.models import Model
 from keras_contrib.layers import InstanceNormalization
-from keras_vggface import VGGFace
-import keras.backend as K
-from data_loader import UTKFace_data
+from data_loader import UTKFace_male_5cat
 
-fnet = VGGFace(include_top=False, input_shape=(128, 128, 3))
-fnet.trainable = False
+import keras.backend as K
+K.set_image_data_format('channels_first')
+
+#from fr_loss import fr_loss
 
 
 def face_recognition_loss(img, pred):
-    return keras.losses.mse(img, pred) # K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=-1))
+    return keras.losses.mse(img, pred) # fr_loss(img, pred) # K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=-1))
 
 
 class AAE:
@@ -28,7 +28,7 @@ class AAE:
         self.rows = r
         self.cols = c
         self.channels = h
-        self.img_shape = (self.rows, self.cols, self.channels)
+        self.img_shape = (self.channels, self.rows, self.cols)
         self.encoded_dim = e_dim
         self.num_classes = num_classes
         self.dataset = dataset
@@ -147,7 +147,7 @@ class AAE:
 
         # Upsampling
         model_input = layers.Dense(6 * 6 * 256)(model_input)
-        model_input = layers.Reshape((6, 6, 256))(model_input)
+        model_input = layers.Reshape((256, 6, 6))(model_input)
         u1 = deconv2d(model_input, self.gf * 4)
         u2 = deconv2d(u1, self.gf * 2)
         u3 = deconv2d(u2, self.gf)
@@ -160,7 +160,7 @@ class AAE:
 
     def train(self, epochs, batch_size=128, save_interval=100):
         # laod data
-        (X_train, y_train) = X, y  # UTKFace_data()
+        (X_train, y_train) = UTKFace_male_5cat(self.img_shape)
 
         # rescale
         X_train = (X_train.astype(np.float32) - 127.5) / 127.5
@@ -260,4 +260,4 @@ class AAE:
 
 if __name__ == '__main__':
     aae = AAE(96, 96, 3, 5, 100, "face_aging_mse")
-    aae.train(epochs=1000, batch_size=32, save_interval=100)
+    # aae.train(epochs=1000, batch_size=32, save_interval=100)
