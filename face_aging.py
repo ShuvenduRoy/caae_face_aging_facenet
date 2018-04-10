@@ -14,61 +14,18 @@ from keras_contrib.layers import InstanceNormalization
 from data_loader import UTKFace_male_5cat
 
 import keras.backend as K
+import tensorflow as tf
+from model import create_model
 
-K.set_image_data_format('channels_first')
-from keras import backend as K
-
-K.set_image_data_format('channels_first')
-from fr_utils import *
-from inception_blocks_v2 import *
+nn4_small2_pretrained = create_model()
+nn4_small2_pretrained.load_weights('weights/nn4.small2.v1.h5')
 
 
-def triplet_loss(y_true, y_pred, alpha=0.2):
-    """
-    Implementation of the triplet loss as defined by formula (3)
+# def face_recognition_loss(img, pred):
+#     return K.sum(K.square(nn4_small2_pretrained(img) - nn4_small2_pretrained(pred)))
 
-    Arguments:
-    y_true -- true labels, required when you define a loss in Keras, you don't need it in this function.
-    y_pred -- python list containing three objects:
-            anchor -- the encodings for the anchor images, of shape (None, 128)
-            positive -- the encodings for the positive images, of shape (None, 128)
-            negative -- the encodings for the negative images, of shape (None, 128)
-
-    Returns:
-    loss -- real number, value of the loss
-    """
-
-    anchor, positive, negative = y_pred[0], y_pred[1], y_pred[2]
-
-    # Step 1: Compute the (encoding) distance between the anchor and the positive
-    pos_dist = tf.reduce_sum(tf.square(tf.subtract(anchor, positive)))
-    # Step 2: Compute the (encoding) distance between the anchor and the negative
-    neg_dist = tf.reduce_sum(tf.square(tf.subtract(anchor, negative)))
-    # Step 3: subtract the two previous distances and add alpha.
-    basic_loss = tf.add(tf.subtract(pos_dist, neg_dist), alpha)
-    # Step 4: Take the maximum of basic_loss and 0.0. Sum over the training examples.
-    loss = tf.maximum(tf.reduce_mean(basic_loss), 0.0)
-
-    return loss
-
-
-FRmodel = faceRecoModel(input_shape=(3, 96, 96))
-FRmodel.compile(optimizer='adam', loss=triplet_loss, metrics=['accuracy'])
-load_weights_from_FaceNet(FRmodel)
-FRmodel.trainable = False
-
-
-def fr_loss(true, pred):
-    encoding_image = FRmodel.predict_on_batch(true)
-    encoding_identity = FRmodel.predict_on_batch(pred)
-
-    # dist = np.linalg.norm(encoding_image - encoding_identity, axis=1)
-    loss = K.mean(encoding_image - encoding_identity, axis=-1)
-    return loss
-
-
-def face_recognition_loss(img, pred):
-    return fr_loss(img, pred)  # K.mean(K.sum(K.abs(fnet(img) - fnet(pred)), axis=-1)) # keras.losses.mse(img, pred)
+def face_reconstruction_loss(y_true, y_pred):
+    return tf.reduce_sum(tf.square(y_pred-y_true), axis=-1)
 
 
 class AAE:
@@ -76,7 +33,7 @@ class AAE:
         self.rows = r
         self.cols = c
         self.channels = h
-        self.img_shape = (self.channels, self.rows, self.cols)
+        self.img_shape = (self.rows, self.cols, self.channels)
         self.encoded_dim = e_dim
         self.num_classes = num_classes
         self.dataset = dataset
@@ -92,26 +49,35 @@ class AAE:
         self.discriminator.compile(optimizer=optimizer, loss=losses.binary_crossentropy,
                                    metrics=[metrices.binary_accuracy])
 
+        self.face_discriminator = nn4_small2_pretrained
+        self.face_discriminator.trainable = False
+
         # encoder
         self.encoder = self.build_encoder()
         self.encoder.compile(loss=['binary_crossentropy'], optimizer=optimizer)
 
         # decoder
         self.decoder = self.build_decoder()
-        self.decoder.compile(loss=[face_recognition_loss], optimizer=optimizer)
+        self.decoder.compile(loss=['mse'], optimizer=optimizer)
 
         img = Input(shape=self.img_shape)
         label = Input(shape=(1,))
+
         encoded = self.encoder(img)
         decoded = self.decoder([encoded, label])
+        face_similarity_score_decoded = self.face_discriminator(decoded)
 
         self.discriminator.trainable = False
 
         validity = self.discriminator(encoded)
 
-        self.adversarial_autoencoder = Model([img, label], [decoded, validity])
-        self.adversarial_autoencoder.compile(loss=[face_recognition_loss, 'binary_crossentropy'],
-                                             loss_weights=[0.999, 0.001],
+        self.adversarial_autoencoder = Model([img, label], [validity, decoded])
+        self.adversarial_autoencoder.compile(loss=['binary_crossentropy', 'mse'],
+                                             loss_weights=[0.001, 0.999],
+                                             optimizer=optimizer)
+
+        self.adversarial_face_autoencoder = Model([img, label], [face_similarity_score_decoded])
+        self.adversarial_face_autoencoder.compile(loss=[face_reconstruction_loss],
                                              optimizer=optimizer)
 
     def build_discriminator(self):
@@ -195,7 +161,7 @@ class AAE:
 
         # Upsampling
         model_input = layers.Dense(6 * 6 * 256)(model_input)
-        model_input = layers.Reshape((256, 6, 6))(model_input)
+        model_input = layers.Reshape((6, 6, 256))(model_input)
         u1 = deconv2d(model_input, self.gf * 4)
         u2 = deconv2d(u1, self.gf * 2)
         u3 = deconv2d(u2, self.gf)
@@ -208,7 +174,7 @@ class AAE:
 
     def train(self, epochs, batch_size=128, save_interval=100):
         # laod data
-        (X_train, y_train) = UTKFace_male_5cat(self.img_shape)
+        (X_train, y_train) = X, y  # UTKFace_male_5cat(self.img_shape)
 
         # rescale
         X_train = (X_train.astype(np.float32) - 127.5) / 127.5
@@ -243,7 +209,11 @@ class AAE:
 
             valid_y = np.ones((half_batch, 1))
 
-            g_loss = self.adversarial_autoencoder.train_on_batch([images, labels], [images, valid_y])
+            g_loss = self.adversarial_autoencoder.train_on_batch([images, labels],
+                                                                 [valid_y, images])
+
+            g_loss1 = self.adversarial_face_autoencoder.train_on_batch([images, labels],
+                                                                 [self.face_discriminator.predict(images)])
 
             # Plot the progress
             print("%d [D loss: %f, acc: %.2f%%] [G loss: %f, mse: %f]" % (
@@ -307,5 +277,5 @@ class AAE:
 
 
 if __name__ == '__main__':
-    aae = AAE(96, 96, 3, 5, 100, "face_aging_mse")
-    # aae.train(epochs=1000, batch_size=32, save_interval=100)
+    aae = AAE(96, 96, 3, 5, 100, "face_aging_fr")
+    aae.train(epochs=5000, batch_size=32, save_interval=100)
